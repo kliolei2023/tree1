@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>V11.6: 漢堡選單控制台</title>
+    <title>V11.7: 穩定性增強版</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
@@ -206,7 +206,7 @@
     </div>
 
     <div id="overlay">
-        <h1>V11.6 漢堡選單控制台</h1>
+        <h1>V11.7 穩定性增強版</h1>
         <p>手動選形狀停止旋轉 | 捏合拖曳 UI</p>
         <button id="start-btn" onclick="initApp()">啟動系統</button>
     </div>
@@ -744,12 +744,12 @@
                 isHandDetected = true;
                 const lm = results.multiHandLandmarks[0];
                 
-                // Cursor & Pinch
+                // Cursor & Pinch (優化一: 提高捏合閾值)
                 const index=lm[8], thumb=lm[4];
                 cursorX=(1-index.x)*window.innerWidth; cursorY=index.y*window.innerHeight;
                 cursor.style.left=`${cursorX}px`; cursor.style.top=`${cursorY}px`;
-                // 檢查食指和拇指的距離
-                if(Math.hypot(index.x-thumb.x, index.y-thumb.y)<0.06) {
+                // 提高捏合閾值到 0.08
+                if(Math.hypot(index.x-thumb.x, index.y-thumb.y) < 0.08) { 
                     cursor.classList.add('pinching');
                     if(!isPinching){ isPinching=true; handlePinchStart(cursorX,cursorY); }
                     else handlePinchMove(cursorX);
@@ -761,17 +761,19 @@
                 handOpenness = Math.max(0, Math.min(1, (avg/size/4 - 0.8)/1.2));
                 const px=1-lm[9].x, py=lm[9].y;
                 
-                // 旋轉邏輯：手移到邊緣加速，移到中間減速至停止
-                if(px>0.7) rotY=0.02; else if(px<0.3) rotY=-0.02;
-                else rotY=0;
+                // 旋轉邏輯 (優化二: 放寬旋轉觸發範圍)
+                // 從 0.3/0.7 調整到 0.4/0.6
+                if(px > 0.6) rotY = 0.02; else if(px < 0.4) rotY = -0.02;
+                else rotY = 0;
                 
-                if(py<0.3) rotX=-0.02; else if(py>0.7) rotX=0.02; else rotX=0;
+                if(py < 0.4) rotX = -0.02; else if(py > 0.6) rotX = 0.02; 
+                else rotX = 0;
                 
-                status.innerText = `模式: ${handOpenness<0.2?"聚攏":"張開"} | 形狀: ${config.currentShape} | 旋轉: ${rotY!=0||rotX!=0?"開啟":"停止"}`;
+                status.innerText = `模式: ${handOpenness<0.2?"聚攏":"張開"} | 形狀: ${config.currentShape} | 旋轉: ${rotY!=0||rotX!=0?"開啟":"停止"} | 捏合: ${isPinching?"啟動":"停止"}`;
 
             } else { 
                 isHandDetected=false; 
-                // 手部離開時，停止旋轉
+                // 核心修改: 手部離開時，停止旋轉
                 rotX = 0;
                 rotY = 0;
                 status.innerText="手部離開 - 旋轉定住";
@@ -809,7 +811,8 @@
         // Animation
         function animate() {
             requestAnimationFrame(animate);
-            if(isHandDetected) smoothedOpenness += (handOpenness-smoothedOpenness)*0.1;
+            // 優化三: 加快平滑係數
+            if(isHandDetected) smoothedOpenness += (handOpenness-smoothedOpenness)*0.2; // 0.1 -> 0.2
             if(particleSystem) { 
                 particleSystem.rotation.y += rotY; 
                 particleSystem.rotation.x += rotX; 
