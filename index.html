@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>V11.6: 漢堡選單控制台</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body { margin: 0;
+ overflow: hidden; background-color: #020502; font-family: 'Segoe UI', sans-serif; user-select: none;
+ }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+ z-index: 1; }
+
+        /* Cursor */
+        #virtual-cursor {
+            position: absolute;
+ width: 24px; height: 24px;
+            background: rgba(255, 50, 50, 0.6);
+            border: 2px solid white; border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none;
+ z-index: 9999; display: none;
+            box-shadow: 0 0 15px red; transition: background 0.1s, transform 0.1s;
+ }
+        #virtual-cursor.pinching {
+            background: #00ff00;
+ box-shadow: 0 0 25px #00ff00; transform: translate(-50%, -50%) scale(0.8);
+        }
+
+        /* UI Panel Container */
+        #ui-panel {
+            position: absolute;
+ top: 20px; left: 20px; width: 350px;
+            background: rgba(10, 15, 20, 0.9); backdrop-filter: blur(15px);
+            padding: 20px; border-radius: 20px;
+ border: 1px solid rgba(100, 200, 255, 0.2);
+            z-index: 100; color: white; display: none; 
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            /* 添加動畫 */
+            transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+        }
+
+        /* 隱藏狀態 */
+        #ui-panel.hidden {
+            transform: translateX(-100%);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* UI Header */
+        #ui-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        #ui-header h2 {
+            margin: 0;
+            font-size: 16px;
+            color: #00d2ff;
+        }
+
+        /* Hamburger Button Style */
+        #toggle-ui-btn {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: background 0.2s;
+        }
+        #toggle-ui-btn:hover {
+            background: rgba(0, 210, 255, 0.3);
+        }
+        
+        /* Inner scrollable content */
+        #ui-content {
+             max-height: 80vh; 
+             overflow-y: auto;
+             padding-right: 5px; /* 留出滾動條空間 */
+        }
+
+        /* Mobile adjustment for smaller width */
+        @media (max-width: 600px) {
+            #ui-panel {
+                width: 90%;
+                left: 5%;
+                top: 5%;
+            }
+             #ui-panel.hidden {
+                transform: translateX(-150%); /* 確保完全移出視圖 */
+            }
+        }
+
+        h3 { margin: 0 0 10px 0;
+ font-size: 14px; color: #00d2ff; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;
+ }
+        .control-group { margin-bottom: 15px;
+ }
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+ }
+        
+        button, .file-upload {
+            background: rgba(255,255,255,0.05);
+ border: 1px solid rgba(255,255,255,0.1);
+            color: #ddd; padding: 10px; border-radius: 8px; cursor: pointer;
+            font-size: 12px; transition: 0.2s; position: relative;
+ }
+        button:hover { background: rgba(0, 210, 255, 0.2); color: white; border-color: #00d2ff;
+ }
+        button.active { background: #00d2ff; color: #000; font-weight: bold; border-color: #00d2ff;
+ box-shadow: 0 0 15px rgba(0,210,255,0.4); }
+        
+        input[type="file"] { display: none;
+ }
+        input[type=range] { width: 100%; height: 6px; background: #333; border-radius: 3px;
+ margin: 8px 0; accent-color: #00d2ff; }
+
+        /* Camera Modal */
+        #camera-modal {
+            position: absolute;
+ top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 300; display: none;
+            flex-direction: column; align-items: center; justify-content: center;
+ }
+        #camera-preview {
+            width: 100%;
+ max-width: 640px; border-radius: 10px; border: 2px solid #333;
+            transform: scaleX(-1);
+ }
+        #camera-controls { margin-top: 20px; display: flex; gap: 20px;
+ }
+        .cam-btn { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none;
+ font-weight: bold; cursor: pointer; }
+        .btn-snap { background: #ff0055; color: white;
+ }
+        .btn-confirm { background: #00ff00; color: black; display: none;
+ }
+        .btn-cancel { background: #555; color: white;
+ }
+
+        /* Overlay */
+        #overlay {
+            position: absolute;
+ top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at center, #00111a, #000); z-index: 200;
+            display: flex; flex-direction: column;
+ align-items: center; justify-content: center; color: white;
+        }
+        #start-btn {
+            padding: 15px 50px;
+ font-size: 20px; background: linear-gradient(45deg, #00d2ff, #0088ff); 
+            border: none; border-radius: 50px; color: #000; font-weight: bold; cursor: pointer; margin-top: 30px;
+ }
+
+        #status-bar {
+            position: absolute;
+ bottom: 20px; width: 100%; text-align: center;
+            color: rgba(255,255,255,0.7); font-size: 14px; pointer-events: none; z-index: 50;
+ }
+        
+        /* Magic Hint */
+        #magic-hint {
+            position: absolute;
+ top: 20%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 40px; font-weight: bold; color: yellow; text-shadow: 0 0 20px orange;
+            opacity: 0;
+ transition: opacity 0.5s; pointer-events: none; z-index: 150;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="virtual-cursor"></div>
+    <div id="status-bar">準備就緒</div>
+    <div id="magic-hint"></div>
+
+    <div id="camera-modal">
+        <h2 style="color:white; margin-bottom:10px">取景</h2>
+        <canvas id="snapshot-canvas" style="display:none; transform: scaleX(-1); max-width:640px; border-radius:10px; border:2px solid #00d2ff;"></canvas>
+        <video id="live-preview" playsinline muted autoplay style="width:100%; max-width:640px; border-radius:10px; transform: scaleX(-1); border:2px solid #555;"></video>
+        
+        
+ <div id="camera-controls">
+            <button class="cam-btn btn-cancel" onclick="closeCamera()">取消</button>
+            <button id="btn-snap" class="cam-btn btn-snap" onclick="takeSnapshot()">快門 📸</button>
+            <button id="btn-retake" class="cam-btn" style="background:#ffaa00; display:none" onclick="retakeSnapshot()">重拍 🔄</button>
+            <button id="btn-confirm" class="cam-btn btn-confirm" onclick="confirmSnapshot()">✅ 確定轉換</button>
+        </div>
+    </div>
+
+    <div id="overlay">
+        <h1>V11.6 漢堡選單控制台</h1>
+        <p>手動選形狀停止旋轉 | 捏合拖曳 UI</p>
+        <button id="start-btn" onclick="initApp()">啟動系統</button>
+    </div>
+
+    <div id="ui-panel">
+        
+        <div id="ui-header">
+            <h2>⚙️ 控制台</h2>
+            <button id="toggle-ui-btn" onclick="toggleUIPanel()">❌</button>
+        </div>
+        
+        <div id="ui-content">
+            <div class="control-group">
+                <h3>🖥️ 渲染模式</h3>
+                <div class="btn-grid">
+                    <button onclick="switchSystem('points')" class="sys-btn active">✨ 光點 (Points)</button>
+                    <button onclick="switchSystem('mesh')" class="sys-btn">🧊 實體 (Mesh)</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>🎨 粒子形狀 (點擊停止旋轉)</h3>
+                <div class="btn-grid">
+                    <button onclick="setShape('heart')" class="shape-btn active">❤️ 鮮豔愛心</button>
+                    <button onclick="setShape('tree')" class="shape-btn">🎄 螺旋聖誕樹</button>
+         
+                    <button onclick="setShape('snowflake')" class="shape-btn">❄️ 冰晶雪花</button>
+                    <label class="file-upload shape-btn" style="border: 1px solid #ff00cc; color:#ffccff">
+                        🖼️ 上傳圖案
+                        <input type="file" accept="image/*" onchange="handleShapeUpload(this)">
+                    </label>
+       
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>🖼️ 寶麗來相片 (牆)</h3>
+                <label class="file-upload" style="display:block;
+     text-align:center;">
+                    📂 上傳相片 (修復版)
+                    <input type="file" multiple accept="image/*" onchange="handlePolaroidUpload(this)">
+                </label>
+                <button onclick="clearPhotos()" style="width:100%;
+     margin-top:5px; background:rgba(255,50,50,0.2)">❌ 清空相片</button>
+            </div>
+
+            <div class="control-group">
+                <h3>📷 粒子快照</h3>
+                <button onclick="openCamera()" style="width:100%;
+     background: #00d2ff; color:black; font-weight:bold;">📸 拍攝 (純淨模式)</button>
+            </div>
+
+            <div class="control-group">
+                <h3>⚙️ 參數 (捏合拖曳)</h3>
+                <label>粒子大小</label>
+                <input type="range" id="slider-size" min="0.2" max="2.5" step="0.1" value="0.9" oninput="updateSize(this.value)">
+                <label>粒子密度</label>
+                <input type="range" id="slider-density" min="2000" max="15000" step="1000" value="10000" oninput="updateDensity(this.value)">
+      
+            </div>
+        </div>
+    </div>
+    
+    <button id="floating-toggle-btn" 
+            style="position: absolute; top: 20px; left: 20px; z-index: 90; 
+                   padding: 10px; font-size: 20px; border-radius: 10px; 
+                   background: rgba(0, 210, 255, 0.8); color: white; border: none; 
+                   cursor: pointer; display: none;" 
+            onclick="toggleUIPanel()">
+        ☰ 
+    </button>
+
+
+    <video id="input_video" playsinline muted autoplay style="display:none"></video>
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- 核心變數 ---
+        const config = {
+            maxParticles: 15000,
+            particleCount: 10000,
+            baseSize: 0.9,
+           
+            mode: 'points', 
+            materialStyle: 'type1',
+            currentShape: 'heart'
+        };
+
+        let scene, camera, renderer, composer;
+        let particleSystem;
+        let polaroidGroup = new THREE.Group();
+        let dummy = new THREE.Object3D();
+
+        const assets = {};
+        let targetPositions = [];
+        let originalPositions = [];
+        let particleColors = []; 
+        let particleScales = []; 
+        
+        let handOpenness = 1.0, smoothedOpenness = 1.0;
+        let isHandDetected = false;
+        let rotX = 0, rotY = 0;
+        let cursorX=0, cursorY=0, isPinching=false, dragTarget=null;
+
+        // --- 新增 UI 摺疊邏輯 ---
+        function toggleUIPanel() {
+            const panel = document.getElementById('ui-panel');
+            const btn = document.getElementById('toggle-ui-btn');
+            const floatBtn = document.getElementById('floating-toggle-btn');
+            
+            if (panel.classList.contains('hidden')) {
+                // 顯示面板
+                panel.classList.remove('hidden');
+                btn.innerText = '❌';
+                floatBtn.style.display = 'none';
+            } else {
+                // 隱藏面板
+                panel.classList.add('hidden');
+                btn.innerText = '☰';
+                floatBtn.style.display = 'block';
+            }
+        }
+        
+        // --- 1. 初始化 ---
+        async function initApp() {
+            document.getElementById('start-btn').innerText = "載入中...";
+            try {
+                initAssets();
+                initThree();
+                const video = document.getElementById('input_video');
+                
+                // 1. 請求攝影機權限
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: "user" } });
+                video.srcObject = stream;
+                document.getElementById('live-preview').srcObject = stream;
+                
+                // 2. 確保在 iOS/Safari 上手動播放
+                const playPromise = video.play();
+                if (playPromise !== undefined) {
+                    await playPromise; // 等待播放承諾完成
+                }
+
+                initMediaPipe();
+                document.getElementById('overlay').style.display = 'none';
+                document.getElementById('ui-panel').style.display = 'block';
+                document.getElementById('virtual-cursor').style.display = 'block';
+            } catch (err) {
+                alert("啟動失敗: " + err.message + "\n請確認已授權使用網路攝影機。");
+            }
+        }
+
+        function initAssets() {
+            const c1 = document.createElement('canvas');
+            c1.width=32; c1.height=32;
+            const ctx1 = c1.getContext('2d');
+            const g1 = ctx1.createRadialGradient(16,16,0,16,16,16);
+            g1.addColorStop(0,'rgba(255,255,255,1)'); g1.addColorStop(0.5,'rgba(255,255,255,0.2)'); g1.addColorStop(1,'rgba(0,0,0,0)');
+            ctx1.fillStyle=g1; ctx1.fillRect(0,0,32,32);
+            assets.texGlow = new THREE.CanvasTexture(c1);
+            const c2 = document.createElement('canvas'); c2.width=32; c2.height=32;
+            const ctx2 = c2.getContext('2d');
+            ctx2.beginPath(); ctx2.arc(16,16,14,0,Math.PI*2); ctx2.fillStyle='white'; ctx2.fill();
+            assets.texSolid = new THREE.CanvasTexture(c2);
+            assets.geoSphere = new THREE.IcosahedronGeometry(0.5, 1);
+            assets.geoCube = new THREE.BoxGeometry(0.7,0.7,0.7);
+        }
+
+        // --- 2. Three.js ---
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+            camera.position.z = 60;
+
+            renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.outputEncoding = THREE.sRGBEncoding; 
+            renderer.toneMapping = THREE.NoToneMapping; 
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            const amb = new THREE.AmbientLight(0xffffff, 0.8); scene.add(amb);
+            const dir = new THREE.DirectionalLight(0xffffff, 1.2); dir.position.set(10,20,10); scene.add(dir);
+            const p1 = new THREE.PointLight(0x00d2ff, 3, 50); p1.position.set(20,10,20); scene.add(p1);
+            const p2 = new THREE.PointLight(0xffffff, 2, 50); p2.position.set(-20,-10,0); scene.add(p2);
+
+            for(let i=0; i<config.maxParticles; i++) {
+                originalPositions.push({ x:(Math.random()-0.5)*150, y:(Math.random()-0.5)*100, z:(Math.random()-0.5)*100 });
+                targetPositions.push({x:0,y:0,z:0});
+                particleColors.push(new THREE.Color(1,1,1));
+                particleScales.push(1.0); 
+            }
+
+            createParticleSystem();
+            scene.add(polaroidGroup);
+            const renderScene = new THREE.RenderPass(scene, camera);
+            
+            // 針對行動裝置優化：降低 Bloom 強度
+            const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 
+                                                    0.6, // 降低強度 (原1.0)
+                                                    0.3, 
+                                                    0.9);
+            composer = new THREE.EffectComposer(renderer);
+            composer.addPass(renderScene);
+            composer.addPass(bloom);
+
+            setShape('heart');
+            animate();
+
+            window.addEventListener('resize', ()=> {
+                camera.aspect = window.innerWidth/window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                composer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function switchSystem(mode) {
+            config.mode = mode;
+            document.querySelectorAll('.sys-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            createParticleSystem();
+            applyColorsToSystem();
+        }
+
+        function createParticleSystem() {
+            if(particleSystem) scene.remove(particleSystem);
+            if (config.mode === 'points') {
+                const geo = new THREE.BufferGeometry();
+                const pos = new Float32Array(config.maxParticles * 3);
+                const col = new Float32Array(config.maxParticles * 3);
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+                const map = (config.materialStyle === 'type1') ? assets.texGlow : assets.texSolid;
+                const mat = new THREE.PointsMaterial({
+                    size: config.baseSize, map: map, vertexColors: true,
+                    transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending, depthWrite: false
+                });
+                particleSystem = new THREE.Points(geo, mat);
+            } else {
+                const geo = (config.materialStyle === 'type1') ?
+                assets.geoSphere : assets.geoCube;
+                let mat;
+                if(config.materialStyle === 'type1') mat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.6, roughness: 0.2 });
+                else mat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.0, roughness: 1.0 });
+
+                particleSystem = new THREE.InstancedMesh(geo, mat, config.maxParticles);
+                particleSystem.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            }
+            updateDensity(config.particleCount);
+            scene.add(particleSystem);
+        }
+
+        function applyColorsToSystem() {
+            if(!particleSystem) return;
+            if(config.mode === 'points') {
+                const colAttr = particleSystem.geometry.attributes.color;
+                for(let i=0; i<config.maxParticles; i++) {
+                    const c = particleColors[i];
+                    colAttr.setXYZ(i, c.r, c.g, c.b);
+                }
+                colAttr.needsUpdate = true;
+            } else {
+                for(let i=0; i<config.maxParticles; i++) {
+                    particleSystem.setColorAt(i, particleColors[i]);
+                }
+                particleSystem.instanceColor.needsUpdate = true;
+            }
+        }
+
+        // --- 4. 形狀算法 (手動選擇形狀後，停止自動旋轉) ---
+        function setShape(type) {
+            // 核心修改: 當手動選擇形狀時，立即停止旋轉
+            rotX = 0;
+            rotY = 0;
+
+            config.currentShape = type;
+            polaroidGroup.visible = true;
+            
+            // 更新 UI 狀態
+            document.querySelectorAll('.shape-btn').forEach(b => b.classList.remove('active'));
+            const buttonToActivate = document.querySelector(`.shape-btn[onclick*="setShape('${type}')"]`) || document.querySelector('.file-upload.shape-btn');
+            if(buttonToActivate && buttonToActivate.tagName === 'BUTTON') {
+                 buttonToActivate.classList.add('active');
+            } else if (buttonToActivate && buttonToActivate.tagName === 'LABEL') {
+                 buttonToActivate.classList.add('active');
+            } else if (event && event.target.tagName === 'BUTTON') {
+                 event.target.classList.add('active');
+            }
+
+            if(type === 'heart') generateHeart();
+            else if (type === 'tree') generateTree();
+            else if (type === 'snowflake') generateSnowflake();
+            else if (type === 'upload') { /* 圖案已由 handleShapeUpload 處理 */ }
+            
+            applyColorsToSystem();
+            showMagicHint(type);
+        }
+
+        function showMagicHint(shape) {
+            const displayMap = {
+                'heart': '❤️ 愛心',
+                'tree': '🎄 聖誕樹',
+                'snowflake': '❄️ 雪花',
+                'upload': '🖼️ 自訂圖案',
+            };
+            const hintText = displayMap[shape] || '圖案已切換';
+            
+            const el = document.getElementById('magic-hint');
+            el.innerText = `✨ 形狀: ${hintText} (旋轉停止)`;
+            el.style.opacity = 1;
+            el.style.transform = "translate(-50%, -50%) scale(1.2)";
+            setTimeout(() => {
+                el.style.opacity = 0;
+                el.style.transform = "translate(-50%, -50%) scale(1)";
+            }, 1500);
+        }
+        
+        function generateHeart() {
+             for(let i=0; i<config.maxParticles; i++) {
+                particleScales[i] = 1.0;
+                const t=Math.random()*6.28, r=Math.pow(Math.random(),0.5);
+                const x=16*Math.pow(Math.sin(t),3);
+                const y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+                const z=(Math.random()-0.5)*5;
+                targetPositions[i]={x:x*r*0.8, y:y*r*0.8, z:z*r};
+                const normalizedY = (y + 15) / 25;
+                const c = new THREE.Color();
+                c.setHSL(0.98, 1.0, 0.4 + normalizedY * 0.4);
+                particleColors[i] = c;
+            }
+        }
+
+        function generateTree() {
+            const starCount = 350;
+            const treeParticles = config.maxParticles - starCount;
+            const totalHeight = 28; const spirals = 7.5;
+            for(let i=0; i<config.maxParticles; i++) {
+                particleScales[i] = 1.0;
+                let c = new THREE.Color();
+                if (i < starCount) {
+                    const isCore = Math.random() > 0.4;
+                    if (isCore) {
+                        const vec = randomOnSphere(1.2);
+                        targetPositions[i] = { x: vec.x, y: vec.y + 14, z: vec.z };
+                    } else {
+                        const dir = randomOnSphere(1);
+                        if (Math.random() > 0.5) targetPositions[i] = { x: dir.x*0.5, y: dir.y*3 + 14, z: dir.z*0.5 };
+                        else targetPositions[i] = { x: dir.x*2.5, y: dir.y*0.5 + 14, z: dir.z*2.5 };
+                    }
+                    c.setHSL(0.6, 0.1, 1.0);
+                } else {
+                    const t = (i - starCount) / treeParticles;
+                    const h = 12 - (t * totalHeight); 
+                    const baseR = Math.pow(t, 0.8) * 14;
+                    const angle = t * Math.PI * 2 * spirals;
+                    const spreadR = (Math.random() - 0.5) * 2.5 * t;
+                    const spreadH = (Math.random() - 0.5) * 1.5;
+                    const finalR = baseR + spreadR;
+                    targetPositions[i] = { x: Math.cos(angle)*finalR, y: h+spreadH, z: Math.sin(angle)*finalR };
+                    const distFromCenter = finalR - baseR;
+                    if (distFromCenter > 0.5) c.setHSL(0.45, 1.0, 0.6 + Math.random()*0.4); 
+                    else if (distFromCenter < -0.5) c.setHSL(0.38, 1.0, 0.15 + Math.random()*0.1);
+                    else c.setHSL(0.35, 0.9, 0.4);
+                    if (Math.random() > 0.985) c.setHex(0xffffff);
+                }
+                particleColors[i] = c;
+            }
+        }
+
+        function generateSnowflake() {
+            for(let i=0; i<config.maxParticles; i++) {
+                particleScales[i] = 1.0;
+                const branch = Math.floor(Math.random() * 6);
+                const angle = (branch / 6) * Math.PI * 2;
+                const dist = Math.random() * 18;
+                let x = Math.cos(angle) * dist;
+                let z = Math.sin(angle) * dist;
+                let y = (Math.random() - 0.5) * 2; 
+                if (dist > 5 && Math.random() > 0.3) {
+                    const subAngle = angle + Math.PI / 3;
+                    const subLen = (Math.random() - 0.5) * (dist * 0.5);
+                    x += Math.cos(subAngle) * subLen;
+                    z += Math.sin(subAngle) * subLen;
+                }
+                x += (Math.random() - 0.5) * 0.5;
+                z += (Math.random() - 0.5) * 0.5;
+                targetPositions[i] = { x: x, y: z, z: y };
+                const c = new THREE.Color();
+                const distFromCenter = Math.sqrt(x*x + z*z);
+                const normalizedDist = distFromCenter / 20;
+                c.setHSL(0.55 + normalizedDist * 0.1, 0.8, 1.0 - normalizedDist * 0.5);
+                particleColors[i] = c;
+            }
+        }
+
+        function handleShapeUpload(input) {
+            if(!input.files.length) return;
+            document.querySelectorAll('.shape-btn').forEach(b => b.classList.remove('active'));
+            input.parentElement.classList.add('active');
+            setShape('upload'); // 標記為自訂圖案模式並停止旋轉
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = () => { processImageToParticles(img); };
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+        
+        function processImageToParticles(img) {
+            const cvs = document.createElement('canvas');
+            const maxRes = 100;
+            const ratio = img.width / img.height;
+            let w = maxRes; let h = maxRes / ratio;
+            cvs.width = w; cvs.height = h;
+            const ctx = cvs.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            const data = ctx.getImageData(0, 0, w, h).data;
+            const validPixels = [];
+            for(let i=0; i<w*h; i++) {
+                if(data[i*4+3] > 100) {
+                    validPixels.push({ r: data[i*4], g: data[i*4+1], b: data[i*4+2], x: (i % w), y: Math.floor(i / w) });
+                }
+            }
+            const numValid = validPixels.length;
+            for(let i=0; i<config.maxParticles; i++) {
+                if (numValid > 0 && i < config.particleCount) {
+                    const p = validPixels[i % numValid];
+                    targetPositions[i] = { x: (p.x - w/2) * 0.5, y: -(p.y - h/2) * 0.5, z: (p.r+p.g+p.b)/255*5/3 };
+                    particleColors[i] = new THREE.Color(p.r/255, p.g/255, p.b/255);
+                    particleScales[i] = 1.0;
+                } else {
+                    particleScales[i] = 0.0;
+                    targetPositions[i] = {x:0, y:0, z:0};
+                }
+            }
+            applyColorsToSystem();
+        }
+
+        function randomOnSphere(r) {
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2 * Math.PI * u; const phi = Math.acos(2 * v - 1);
+            return { x: r * Math.sin(phi) * Math.cos(theta), y: r * Math.sin(phi) * Math.sin(theta), z: r * Math.cos(phi) };
+        }
+
+        // --- 5. 寶麗來與快照 ---
+        function handlePolaroidUpload(input) {
+            if(!input.files.length) return;
+            while(polaroidGroup.children.length > 0) polaroidGroup.remove(polaroidGroup.children[0]);
+            Array.from(input.files).forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image(); img.src = e.target.result;
+                    img.onload = () => createPolaroidMesh(img, index, 
+                    input.files.length);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+        function createPolaroidMesh(img, index, total) {
+            const cvs = document.createElement('canvas');
+            cvs.width=512; cvs.height=600;
+            const ctx = cvs.getContext('2d');
+            ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,512,600);
+            const ratio = img.width/img.height;
+            let dw=450, dh=450/ratio; if(dh>450){ dh=450; dw=450*ratio;
+            }
+            ctx.drawImage(img, 256-dw/2, 30, dw, dh);
+            ctx.fillStyle="#000000"; ctx.font="40px cursive";
+            ctx.textAlign="center";
+            ctx.fillText(`Moments #${index+1}`, 256, 550);
+            
+            const tex = new THREE.CanvasTexture(cvs);
+            tex.encoding = THREE.sRGBEncoding;
+            const mat = new THREE.MeshBasicMaterial({ map:tex, side:THREE.DoubleSide, toneMapped: false });
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(8,9.3), mat);
+            
+            const ang = (index/total)*Math.PI*2;
+            mesh.position.set(Math.cos(ang)*22, (Math.random()-0.5)*5, Math.sin(ang)*22);
+            mesh.lookAt(0,0,0);
+            mesh.rotation.y += Math.PI;
+            polaroidGroup.add(mesh);
+        }
+        function clearPhotos() { while(polaroidGroup.children.length>0) polaroidGroup.remove(polaroidGroup.children[0]);
+        }
+
+        function openCamera() { document.getElementById('camera-modal').style.display='flex'; document.getElementById('live-preview').play(); document.getElementById('live-preview').style.display='block'; document.getElementById('snapshot-canvas').style.display='none'; document.getElementById('btn-snap').style.display='inline-block'; document.getElementById('btn-confirm').style.display='none'; document.getElementById('btn-retake').style.display='none';
+        }
+        function closeCamera() { document.getElementById('camera-modal').style.display='none';
+        }
+        function takeSnapshot() { const v=document.getElementById('live-preview'), c=document.getElementById('snapshot-canvas'); c.width=640; c.height=480; c.getContext('2d').drawImage(v,0,0,640,480); v.style.display='none'; c.style.display='block'; document.getElementById('btn-snap').style.display='none';
+        document.getElementById('btn-confirm').style.display='inline-block'; document.getElementById('btn-retake').style.display='inline-block'; }
+        function retakeSnapshot() { document.getElementById('live-preview').style.display='block'; document.getElementById('snapshot-canvas').style.display='none'; document.getElementById('btn-snap').style.display='inline-block'; document.getElementById('btn-confirm').style.display='none'; document.getElementById('btn-retake').style.display='none';
+        }
+        
+        function confirmSnapshot() {
+            const canvas = document.getElementById('snapshot-canvas');
+            const tCtx = document.createElement('canvas').getContext('2d'); tCtx.canvas.width=100; tCtx.canvas.height=75; 
+            
+            tCtx.drawImage(canvas,0,0,100,75); 
+
+            const data = tCtx.getImageData(0,0,100,75).data;
+            let pIdx=0;
+            for(let i=0; i<7500; i++) {
+                if(pIdx>=config.maxParticles) break;
+                if(data[i*4+3]>100) {
+                    targetPositions[pIdx]={x:(i%100-50)*0.8, y:-(Math.floor(i/100)-37.5)*0.8, z:(data[i*4]/255)*5};
+                    particleColors[pIdx]=new THREE.Color(data[i*4]/255, data[i*4+1]/255, data[i*4+2]/255);
+                    particleScales[pIdx]=1.0; pIdx++;
+                }
+            }
+            for(let k=pIdx; k<config.maxParticles; k++) { particleScales[k]=0.0;
+            targetPositions[k]={x:0,y:0,z:0}; }
+            polaroidGroup.visible=false; applyColorsToSystem(); closeCamera();
+        }
+
+
+        // --- 6. MediaPipe & Hand Gesture ---
+        function initMediaPipe() {
+            const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+            hands.onResults(onHandResults);
+            const video = document.getElementById('input_video');
+            const loop = async () => { if (video.readyState >= 2) await hands.send({image: video}); requestAnimationFrame(loop); };
+            loop();
+        }
+
+        function onHandResults(results) {
+            const cursor = document.getElementById('virtual-cursor');
+            const status = document.getElementById('status-bar');
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                isHandDetected = true;
+                const lm = results.multiHandLandmarks[0];
+                
+                // Cursor & Pinch
+                const index=lm[8], thumb=lm[4];
+                cursorX=(1-index.x)*window.innerWidth; cursorY=index.y*window.innerHeight;
+                cursor.style.left=`${cursorX}px`; cursor.style.top=`${cursorY}px`;
+                // 檢查食指和拇指的距離
+                if(Math.hypot(index.x-thumb.x, index.y-thumb.y)<0.06) {
+                    cursor.classList.add('pinching');
+                    if(!isPinching){ isPinching=true; handlePinchStart(cursorX,cursorY); }
+                    else handlePinchMove(cursorX);
+                } else { cursor.classList.remove('pinching'); isPinching=false; dragTarget=null; }
+                
+                // Openness & Rotation
+                const wrist=lm[0], size=Math.hypot(lm[9].x-wrist.x, lm[9].y-wrist.y);
+                let avg=0; [8,12,16,20].forEach(i=>avg+=Math.hypot(lm[i].x-wrist.x, lm[i].y-wrist.y));
+                handOpenness = Math.max(0, Math.min(1, (avg/size/4 - 0.8)/1.2));
+                const px=1-lm[9].x, py=lm[9].y;
+                
+                // 旋轉邏輯：手移到邊緣加速，移到中間減速至停止
+                if(px>0.7) rotY=0.02; else if(px<0.3) rotY=-0.02;
+                else rotY=0;
+                
+                if(py<0.3) rotX=-0.02; else if(py>0.7) rotX=0.02; else rotX=0;
+                
+                status.innerText = `模式: ${handOpenness<0.2?"聚攏":"張開"} | 形狀: ${config.currentShape} | 旋轉: ${rotY!=0||rotX!=0?"開啟":"停止"}`;
+
+            } else { 
+                isHandDetected=false; 
+                // 手部離開時，停止旋轉
+                rotX = 0;
+                rotY = 0;
+                status.innerText="手部離開 - 旋轉定住";
+            }
+        }
+        
+        // --- 恢復捏合/點擊和拖曳函數 ---
+        function handlePinchStart(x, y) {
+            const el = document.elementFromPoint(x, y);
+            if(el && (el.tagName==='INPUT'||el.tagName==='BUTTON'||el.tagName==='LABEL')) { 
+                if(el.tagName==='INPUT'&&el.type==='range') dragTarget=el;
+                // 點擊按鈕或標籤 (Label)
+                else { 
+                    el.click(); 
+                    // 點擊形狀按鈕時 setShape 會停止旋轉
+                    el.style.transform='scale(0.9)'; setTimeout(()=>el.style.transform='scale(1)',150); 
+                }
+            }
+        }
+        function handlePinchMove(x) {
+            if(dragTarget) {
+                const rect=dragTarget.getBoundingClientRect();
+                let v = (x-rect.left)/rect.width;
+                const min=parseFloat(dragTarget.min), max=parseFloat(dragTarget.max), step=parseFloat(dragTarget.step);
+                v = min + (max-min)*Math.max(0,Math.min(1,v)); if(step) v=Math.round(v/step)*step;
+                dragTarget.value=v; dragTarget.dispatchEvent(new Event('input'));
+            }
+        }
+        
+        function updateSize(v) { config.baseSize=parseFloat(v);
+            if(config.mode==='points') particleSystem.material.size=config.baseSize; }
+        function updateDensity(v) { config.particleCount=parseInt(v); if(config.mode==='points') particleSystem.geometry.setDrawRange(0,config.particleCount); else particleSystem.count=config.particleCount;
+        }
+
+        // Animation
+        function animate() {
+            requestAnimationFrame(animate);
+            if(isHandDetected) smoothedOpenness += (handOpenness-smoothedOpenness)*0.1;
+            if(particleSystem) { 
+                particleSystem.rotation.y += rotY; 
+                particleSystem.rotation.x += rotX; 
+                polaroidGroup.rotation.y = particleSystem.rotation.y; 
+                polaroidGroup.rotation.x = particleSystem.rotation.x;
+            }
+            const time=Date.now()*0.001; const mix=1-smoothedOpenness;
+            if(config.mode==='points') {
+                const pos=particleSystem.geometry.attributes.position;
+                for(let i=0; i<config.particleCount; i++) {
+                    const s=particleScales[i];
+                    if(s<0.01){ pos.setXYZ(i,1000,1000,1000); continue; }
+                    const t=targetPositions[i], o=originalPositions[i];
+                    pos.setXYZ(i, (o.x+Math.sin(time+i*0.1)*3)*(1-mix)+t.x*mix, (o.y+Math.cos(time+i*0.2)*3)*(1-mix)+t.y*mix, o.z*(1-mix)+t.z*mix);
+                }
+                pos.needsUpdate=true;
+            } else {
+                for(let i=0; i<config.particleCount; i++) {
+                    const s=particleScales[i];
+                    if(s<0.01){ dummy.scale.set(0,0,0); } else {
+                        const t=targetPositions[i], o=originalPositions[i];
+                        dummy.position.set((o.x+Math.sin(time+i*0.1)*3)*(1-mix)+t.x*mix, (o.y+Math.cos(time+i*0.2)*3)*(1-mix)+t.y*mix, o.z*(1-mix)+t.z*mix);
+                        dummy.rotation.set(time+i,time+i,0); dummy.scale.set(config.baseSize*(1-mix*0.3)*s,config.baseSize*(1-mix*0.3)*s,config.baseSize*(1-mix*0.3)*s);
+                    }
+                    dummy.updateMatrix();
+                    particleSystem.setMatrixAt(i, dummy.matrix);
+                }
+                particleSystem.instanceMatrix.needsUpdate=true;
+            }
+            composer.render();
+        }
+    </script>
+</body>
+</html>
